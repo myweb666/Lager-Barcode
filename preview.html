@@ -1,0 +1,462 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barcode Scanner – Produktverwaltung</title>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#f1f4f9;color:#202b3c;margin:0;padding:16px}
+.container{max-width:1000px;margin:auto}
+.card{background:white;padding:20px;margin-bottom:16px;border-radius:14px;box-shadow:0 3px 14px #0000000c}
+h1{font-size:25px;color:#1746a2}
+h2{font-size:19px}
+input{width:100%;padding:12px;margin:6px 0 13px;border:1px solid #ccd3df;border-radius:8px;font-size:16px}
+button{border:0;padding:12px 17px;border-radius:8px;cursor:pointer;font-size:15px;margin:4px}
+.primary{background:#2458d5;color:white}
+.success{background:#14804a;color:white}
+.danger{background:#c62828;color:white}
+.gray{background:#e8edf5;color:#26354d}
+.hidden{display:none!important}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.actions{display:flex;flex-wrap:wrap;gap:5px}
+#reader{max-width:500px;margin:12px auto}
+.status{padding:10px;color:#2458d5;min-height:25px}
+table{width:100%;border-collapse:collapse;min-width:650px}
+th,td{padding:11px;border-bottom:1px solid #ddd;text-align:center}
+th{background:#eef2fa}
+.table-wrap{overflow-x:auto}
+.total{font-size:20px;font-weight:bold;margin-top:15px}
+.confirm-box{border:2px solid #16804a;background:#f1fff6}
+.small{font-size:13px;color:#667085;line-height:1.8}
+@media(max-width:600px){
+.grid{grid-template-columns:1fr}
+body{padding:8px}
+.card{padding:14px}
+h1{font-size:20px}
+}
+@media print{
+body{background:white;padding:0}
+.no-print{display:none!important}
+.card{box-shadow:none;border:0}
+.container{max-width:none}
+table{min-width:0;font-size:11px}
+th,td{padding:7px}
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<div class="card">
+<h1>📦 Barcode Scanner – Produktverwaltung</h1>
+<p>Produkte scannen, Daten überprüfen, bestätigen und als PDF speichern.</p>
+<p class="small">
+Alle bestätigten Produkte werden automatisch im Browser gespeichert.
+</p>
+</div>
+
+<div class="card no-print">
+<h2>1. Barcode scannen</h2>
+
+<label>Barcode / EAN-Nummer</label>
+<input id="barcode" placeholder="Barcode scannen oder eingeben" autocomplete="off">
+
+<div class="actions">
+<button class="primary" onclick="startCamera()">📷 Kamera starten</button>
+<button class="gray" onclick="stopCamera()">Kamera stoppen</button>
+</div>
+
+<div id="reader"></div>
+
+<p class="small">
+Sie können einen USB- oder Bluetooth-Barcodescanner verwenden.
+Der Scanner muss die Nummer wie eine Tastatur eingeben.
+</p>
+
+<div class="status" id="status"></div>
+</div>
+
+<div class="card no-print">
+<h2>2. Produktinformationen</h2>
+
+<div class="grid">
+<div>
+<label>Produktname</label>
+<input id="name" placeholder="Produktname eingeben">
+</div>
+
+<div>
+<label>Einzelpreis (€)</label>
+<input id="price" type="number" min="0" step="0.01" placeholder="Preis eingeben">
+</div>
+
+<div>
+<label>Menge</label>
+<input id="quantity" type="number" min="1" value="1">
+</div>
+
+<div>
+<label>Datum und Uhrzeit</label>
+<input id="date" readonly>
+</div>
+</div>
+
+<div class="actions">
+<button class="success" onclick="showConfirmation()">Informationen überprüfen</button>
+<button class="gray" onclick="cancelProduct()">Abbrechen</button>
+</div>
+</div>
+
+<div class="card confirm-box hidden no-print" id="confirmation">
+<h2>3. Produkt bestätigen</h2>
+<p>Bitte überprüfen Sie alle Angaben vor der endgültigen Speicherung.</p>
+
+<div id="preview"></div>
+
+<div class="actions">
+<button class="success" onclick="confirmProduct()">✓ Bestätigen und speichern</button>
+<button class="primary" onclick="editProduct()">Bearbeiten</button>
+<button class="danger" onclick="cancelProduct()">Abbrechen</button>
+</div>
+</div>
+
+<div class="card">
+<h2>4. Gespeicherte Produkte</h2>
+
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Nr.</th>
+<th>Barcode</th>
+<th>Produktname</th>
+<th>Einzelpreis</th>
+<th>Menge</th>
+<th>Gesamtpreis</th>
+<th class="no-print">Aktion</th>
+</tr>
+</thead>
+<tbody id="productList"></tbody>
+</table>
+</div>
+
+<div class="total" id="total">Gesamtsumme: 0,00 €</div>
+<p class="small" id="productCount">Anzahl der Produkte: 0</p>
+
+<div class="actions no-print">
+<button class="primary" onclick="makePDF()">📄 PDF erstellen</button>
+<button class="gray" onclick="exportCSV()">Excel / CSV exportieren</button>
+<button class="danger" onclick="clearAll()">Alle Produkte löschen</button>
+</div>
+
+<p class="small no-print">
+Zum Erstellen einer PDF-Datei wählen Sie im Druckfenster
+die Option „Als PDF speichern“.
+</p>
+</div>
+
+</div>
+
+<script>
+let products=[];
+let scanner=null;
+let pending=null;
+let editIndex=-1;
+
+const $=id=>document.getElementById(id);
+
+function money(value){
+ return Number(value).toLocaleString('de-DE',{
+  minimumFractionDigits:2,
+  maximumFractionDigits:2
+ })+' €';
+}
+
+function today(){
+ return new Date().toLocaleString('de-DE');
+}
+
+function setDate(){
+ $('date').value=today();
+}
+
+function status(message){
+ $('status').textContent=message;
+}
+
+function escapeHTML(value){
+ return String(value??'').replace(/[&<>"']/g,c=>({
+  '&':'&amp;','<':'&lt;','>':'&gt;',
+  '"':'&quot;',"'":'&#39;'
+ })[c]);
+}
+
+// Kamera starten
+async function startCamera(){
+ if(!window.Html5Qrcode){
+  status('Scanner-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen.');
+  return;
+ }
+
+ try{
+  if(scanner) await stopCamera();
+
+  scanner=new Html5Qrcode('reader');
+
+  await scanner.start(
+   {facingMode:'environment'},
+   {fps:10,qrbox:{width:260,height:130}},
+   async decodedText=>{
+    $('barcode').value=decodedText;
+    setDate();
+    status('Barcode erfolgreich erkannt. Bitte Produktdaten eingeben.');
+    await stopCamera();
+    $('name').focus();
+   },
+   ()=>{}
+  );
+
+  status('Kamera ist aktiv. Bitte Barcode vor die Kamera halten.');
+
+ }catch(error){
+  status('Kamera konnte nicht gestartet werden: '+error);
+ }
+}
+
+// Kamera stoppen
+async function stopCamera(){
+ if(scanner){
+  try{
+   await scanner.stop();
+   scanner.clear();
+  }catch(e){}
+  scanner=null;
+ }
+}
+
+// USB-Barcodescanner
+$('barcode').addEventListener('keydown',e=>{
+ if(e.key==='Enter'){
+  e.preventDefault();
+  setDate();
+  status('Barcode empfangen. Bitte Produktdaten eingeben.');
+  $('name').focus();
+ }
+});
+
+// Formulardaten lesen
+function getFormData(){
+ return {
+  barcode:$('barcode').value.trim(),
+  name:$('name').value.trim(),
+  price:Number($('price').value),
+  quantity:Number($('quantity').value),
+  date:$('date').value||today()
+ };
+}
+
+// Angaben überprüfen
+function showConfirmation(){
+ const p=getFormData();
+
+ if(!p.barcode){
+  alert('Bitte zuerst einen Barcode scannen oder eingeben.');
+  $('barcode').focus();
+  return;
+ }
+
+ if($('price').value===''||!Number.isFinite(p.price)||p.price<0){
+  alert('Bitte einen gültigen Einzelpreis eingeben.');
+  $('price').focus();
+  return;
+ }
+
+ if(!Number.isInteger(p.quantity)||p.quantity<1){
+  alert('Bitte eine gültige Menge eingeben.');
+  $('quantity').focus();
+  return;
+ }
+
+ pending=p;
+
+ $('preview').innerHTML=`
+ <p><b>Barcode:</b> ${escapeHTML(p.barcode)}</p>
+ <p><b>Produktname:</b> ${escapeHTML(p.name||'Nicht angegeben')}</p>
+ <p><b>Einzelpreis:</b> ${money(p.price)}</p>
+ <p><b>Menge:</b> ${p.quantity}</p>
+ <p><b>Gesamtpreis:</b> ${money(p.price*p.quantity)}</p>
+ <p><b>Datum und Uhrzeit:</b> ${escapeHTML(p.date)}</p>
+ `;
+
+ $('confirmation').classList.remove('hidden');
+ $('confirmation').scrollIntoView({behavior:'smooth'});
+}
+
+// Endgültig bestätigen
+function confirmProduct(){
+ if(!pending)return;
+
+ if(editIndex>=0){
+  products[editIndex]=pending;
+ }else{
+  products.push(pending);
+ }
+
+ save();
+ render();
+ cancelProduct();
+
+ status('Produkt wurde erfolgreich gespeichert.');
+}
+
+// Bearbeiten
+function editProduct(){
+ $('confirmation').classList.add('hidden');
+ $('name').focus();
+}
+
+// Formular zurücksetzen
+function cancelProduct(){
+ pending=null;
+ editIndex=-1;
+
+ $('confirmation').classList.add('hidden');
+ $('barcode').value='';
+ $('name').value='';
+ $('price').value='';
+ $('quantity').value=1;
+
+ setDate();
+}
+
+// Daten speichern
+function save(){
+ localStorage.setItem('barcode_products',JSON.stringify(products));
+}
+
+// Tabelle aktualisieren
+function render(){
+ const body=$('productList');
+
+ if(products.length===0){
+  body.innerHTML='<tr><td colspan="7">Noch keine Produkte gespeichert.</td></tr>';
+ }else{
+  body.innerHTML=products.map((p,i)=>`
+  <tr>
+   <td>${i+1}</td>
+   <td>${escapeHTML(p.barcode)}</td>
+   <td>${escapeHTML(p.name||'-')}</td>
+   <td>${money(p.price)}</td>
+   <td>${p.quantity}</td>
+   <td>${money(p.price*p.quantity)}</td>
+   <td class="no-print">
+    <button class="primary" onclick="editSaved(${i})">Bearbeiten</button>
+    <button class="danger" onclick="removeProduct(${i})">Löschen</button>
+   </td>
+  </tr>
+  `).join('');
+ }
+
+ const total=products.reduce((sum,p)=>
+  sum+p.price*p.quantity,0);
+
+ $('total').textContent='Gesamtsumme: '+money(total);
+ $('productCount').textContent='Anzahl der Produkte: '+products.length;
+}
+
+// Gespeichertes Produkt bearbeiten
+function editSaved(i){
+ const p=products[i];
+
+ editIndex=i;
+ pending=null;
+
+ $('barcode').value=p.barcode;
+ $('name').value=p.name;
+ $('price').value=p.price;
+ $('quantity').value=p.quantity;
+ $('date').value=p.date;
+
+ $('name').focus();
+}
+
+// Produkt löschen
+function removeProduct(i){
+ if(confirm('Möchten Sie dieses Produkt wirklich löschen?')){
+  products.splice(i,1);
+  save();
+  render();
+ }
+}
+
+// Alle Produkte löschen
+function clearAll(){
+ if(confirm('Möchten Sie wirklich alle Produkte löschen?')){
+  products=[];
+  save();
+  render();
+ }
+}
+
+// PDF erstellen
+function makePDF(){
+ if(!products.length){
+  alert('Es sind noch keine Produkte vorhanden.');
+  return;
+ }
+ window.print();
+}
+
+// CSV-Datei erstellen
+function exportCSV(){
+ if(!products.length){
+  alert('Es sind keine Produkte zum Exportieren vorhanden.');
+  return;
+ }
+
+ const data=[
+  ['Barcode','Produktname','Einzelpreis EUR','Menge','Gesamtpreis EUR','Datum und Uhrzeit'],
+  ...products.map(p=>[
+   p.barcode,p.name,p.price,p.quantity,
+   p.price*p.quantity,p.date
+  ])
+ ];
+
+ const csv='\uFEFF'+data.map(row=>
+  row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')
+ ).join('\r\n');
+
+ const blob=new Blob([csv],{
+  type:'text/csv;charset=utf-8'
+ });
+
+ const link=document.createElement('a');
+ link.href=URL.createObjectURL(blob);
+ link.download='Produktbericht.csv';
+ link.click();
+ URL.revokeObjectURL(link.href);
+}
+
+// Gespeicherte Produkte laden
+try{
+ products=JSON.parse(
+  localStorage.getItem('barcode_products')||'[]'
+ );
+
+ if(!Array.isArray(products))products=[];
+}catch(e){
+ products=[];
+}
+
+setDate();
+render();
+
+</script>
+</body>
+</html>
